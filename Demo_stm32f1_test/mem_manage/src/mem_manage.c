@@ -121,29 +121,27 @@ void *pvReturn = NULL;
 				{
 					pxBlock_used = pxBlock;
 					pxPreviousBlock_used = pxPreviousBlock;
-				#if 0
+				#if defined(TATTER_OPTIME_EN) && (TATTER_OPTIME_EN > 0)
 					// 找到了第一个可用内存块，且很大，需要分隔，真的需要分隔，不再找找
-					if( ( pxBlock->xBlockSize - xWantedSize ) > heapMINIMUM_BLOCK_SIZE )
-					{
+					if( ( pxBlock->xBlockSize - xWantedSize ) > heapMINIMUM_BLOCK_SIZE ){
 						pxBlock_used = pxBlock;  // 保存可用的pxBlock
 						pxPreviousBlock_used = pxPreviousBlock;
-						
 						// 找下一个更合适的内存块
 						pxPreviousBlock = pxBlock;
 						pxBlock = pxBlock->pxNextFreeBlock;
-						while(pxBlock->pxNextFreeBlock != NULL)
-						{
+						while(pxBlock->pxNextFreeBlock != NULL){
 							if((pxBlock->xBlockSize >= xWantedSize) \
-								&& (pxBlock->xBlockSize < pxBlock_used->xBlockSize))
-							{
+								&& ((pxBlock->xBlockSize - xWantedSize) <= heapMINIMUM_BLOCK_SIZE)){
 								// 找到新的更优内存块
 								pxBlock_used = pxBlock;
 								pxPreviousBlock_used = pxPreviousBlock;
 							}
 
+							#if 0   // 为优化效率考虑的，碎片较多时，查询可能比较耗时，可控制查询深度
 							search_depth++;
-							if(search_depth >= 3)
+							if(search_depth >= 10)
 								break; // 不找了，
+							#endif
 
 							// 下一个内存块
 							pxPreviousBlock = pxBlock;
@@ -311,23 +309,27 @@ size_t xPortGetFreeBlockNum( void )
 }
 
 // 打印此时内存池情况
-void xMemDebugPrintfFreeBlock(void)
+size_t xMemGetFreeBlockNum(uint8_t flag)
 {
 	BlockLink_t *pxIterator = &xStart;
 	size_t num = 0;
-	// char sizeStrs[1024];
-	// memset(sizeStrs,0,sizeof(sizeStrs));
 
-	MEM_MANAGE_PRINTF("\nxMemDebugPrintfFreeBlock:\n");
+	if (flag)
+		MEM_MANAGE_PRINTF("\nxMemFreeBlock:\n");
 	while(pxIterator->pxNextFreeBlock != NULL)
 	{
 		if(pxIterator->xBlockSize > 0) {
-			MEM_MANAGE_PRINTF("[%ld@0x%08x] ",pxIterator->xBlockSize,(size_t)(pxIterator));
+			// MEM_MANAGE_PRINTF("[%ld@0x%08x] ",pxIterator->xBlockSize,(size_t)(pxIterator));
+			if (flag)
+				MEM_MANAGE_PRINTF("[%ld] ",pxIterator->xBlockSize);
 			num++;
 		}
 		pxIterator = pxIterator->pxNextFreeBlock;
 	}
-	MEM_MANAGE_PRINTF("\nnum:%d\n",num);
+	if (flag)
+		MEM_MANAGE_PRINTF(" ->num:%d\n",num);
+
+	return num;
 }
 
 /*-----------------------------------------------------------*/
@@ -493,7 +495,7 @@ void vPortDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions )
 	xBlockAllocatedBit = ( ( size_t ) 1 ) << ( ( sizeof( size_t ) * heapBITS_PER_BYTE ) - 1 );
 
 	MEM_MANAGE_PRINTF("\ninit xFreeBlockNum:%d\n",xFreeBlockNum);
-	xMemDebugPrintfFreeBlock();
+	xMemGetFreeBlockNum(1);
 }
 
 // void* pvPortReAlloc( void *pv,  size_t xWantedSize )

@@ -9,9 +9,10 @@
 #include "mem_manage.h"
 
 
+static uint8_t userHeap[0x4000] __attribute__((at(0x20001000)));
 MemHeapRegion_t xHeapRegions[] =
 {
-	{( uint8_t * ) 0x20004000UL, 0x1000 }, // << Defines a block of 0x10000 bytes starting at address 0x80000000
+	{( uint8_t * )userHeap, sizeof(userHeap)}, // << Defines a block of 0x10000 bytes starting at address 0x80000000
 	{ NULL, 0 }                            // << Terminates the array.
 };
 
@@ -36,40 +37,84 @@ static void __rcc_clock_config(void)
         while (1);
     }
 }
+ 
+/************** 内存碎片测试程序 ************
+ * 利用 rand 产生指定范围内的伪随机数，然后申请对应大小的内存
+ * 释放内存时，也随机释放
+*******************************************/
+#define TEST_BLOCK_NUM  210
+static uint8_t *(user[TEST_BLOCK_NUM + 1]) = {NULL};
+static uint32_t usedMemSize = 0,freeMemSize = 0;
 
-static void mem_manage_test(void)
+static uint32_t __build_rand_value(void)
 {
-    uint8_t *(user[10]) = {NULL};
-    uint32_t i = 0;
+	uint32_t rand_value = 0;
+	rand_value = rand() % TEST_BLOCK_NUM;
+	if(rand_value == 0)
+		rand_value = rand_value + 1;
+	
+	return rand_value;
+}
 
-    for ( i = 0; i < 10; i++)
-    {
-        user[i] = (uint8_t *)pvPortMalloc((i+1) << 2);
-		user[i] = (uint8_t *)pvPortMalloc((i+1) << 2);
+static int mem_manage_test(void)
+{
+    uint32_t rand_value = 0, size = 0;
+
+    rand_value = __build_rand_value();
+
+    size = rand_value;
+    if (user[rand_value] == NULL){
+        user[rand_value] = (uint8_t *)MEM_MALLOC(size);
+        if (user[rand_value] == NULL){
+            SEGGER_RTT_printf(0,"MEM_MALLOC fail, want size:%d\n",size);
+            return -1;
+        }else{
+            usedMemSize += size;
+        }
     }
 
-    for ( i = 0; i < 10; i += 2)
-    {
-        vPortFree(user[i]);
+    rand_value = __build_rand_value();
+    if (user[rand_value] != NULL){
+        MEM_FREE(user[rand_value]);
+        user[rand_value] = NULL;
+        freeMemSize += (rand_value);
     }
+
+    return 0;
 }
 
 int main(void)
 {
+    uint32_t freeMemBlockMaxNum = 0, freeNum = 0, testCount = 0;
+    /* 初始化随机数发生器 */
+    srand(125);
     __NVIC_CONFIG();
     __rcc_clock_config();
 
     vPortDefineHeapRegions(xHeapRegions);
-	
-    mem_manage_test();
-	
-	SEGGER_RTT_printf(0,"SEGGER_RTT_printf success.\n");
+
+	SEGGER_RTT_printf(0,"mem test start.....\n");
 
     while(1)
     {
-		SysTick_delay_ms(1000);
-		xMemDebugPrintfFreeBlock();
+		// SysTick_delay_ms(5);
+		
+        freeNum = xMemGetFreeBlockNum(0);
+		if( freeNum > freeMemBlockMaxNum ){
+            freeMemBlockMaxNum = freeNum;
+        }
+
+        if( mem_manage_test() != 0){
+            SEGGER_RTT_printf(0,"test complete,count:%d,freeMemBlockMaxNum:%d.\n",testCount,freeMemBlockMaxNum);
+            SEGGER_RTT_printf(0,"used size:%d, free size:%d\n",usedMemSize,freeMemSize);
+
+            xMemGetFreeBlockNum(1);
+            break;
+        }
+		testCount++;
     }
+
+
 }
 
 

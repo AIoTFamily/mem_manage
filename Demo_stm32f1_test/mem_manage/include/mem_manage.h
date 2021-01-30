@@ -34,7 +34,17 @@ void *pvPortMalloc( size_t xWantedSize );
 void vPortDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions );
 void vPortFree( void *pv );
 
-void xMemDebugPrintfFreeBlock(void);
+size_t xMemGetFreeBlockNum(uint8_t flag);
+
+#define TATTER_OPTIME_EN	0	// 碎片优化使能
+
+#if 0
+#define MEM_MALLOC		malloc
+#define MEM_FREE		free
+#else
+#define MEM_MALLOC		pvPortMalloc
+#define MEM_FREE		vPortFree
+#endif
 
 #ifndef configASSERT
 #define configASSERT( x )
