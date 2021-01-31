@@ -1,0 +1,7 @@
+*.o
+*.d
+*.crf
+
+Objects/
+
+
