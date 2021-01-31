@@ -9,6 +9,10 @@
 
 #include "mem_manage.h"
 
+#if !defined(MEM_MANAGE_PRINTF)
+	#error "please define MEM_MANAGE_PRINTF Macro, in mem_manage.h file !!!"
+#endif
+
 /*-----------------------------------------------------------*/
 
 /* Define the linked list structure.  This is used to link free blocks in order
@@ -54,18 +58,22 @@ static size_t xBlockAllocatedBit = 0;
 // 空闲内存块计数，表征内存碎片化情况
 static size_t xFreeBlockNum = 0;
 
+mem_manage_t xMemManage;
+
 /*-----------------------------------------------------------*/
 
-void *pvPortMalloc( size_t xWantedSize )
+void *memMalloc( size_t xWantedSize )
 {
-BlockLink_t *pxBlock, *pxBlock_used, *pxPreviousBlock, *pxPreviousBlock_used, *pxNewBlockLink;
-void *pvReturn = NULL;
+	BlockLink_t *pxBlock, *pxBlock_used, *pxPreviousBlock, *pxPreviousBlock_used, *pxNewBlockLink;
+	void *pvReturn = NULL;
 
-	size_t search_depth = 0;  // 尝试查找更优内存块的深度
+	// size_t search_depth = 0;  // 尝试查找更优内存块的深度
 
 	/* The heap must be initialised before the first call to
 	prvPortMalloc(). */
-	configASSERT( pxEnd );
+	if (pxEnd == NULL){
+		return NULL;
+	}
 
 #if defined(OPERATE_SYSTEM) && (OPERATE_SYSTEM == SYSTEM_FREERTOS)
 	vTaskSuspendAll();
@@ -216,28 +224,24 @@ void *pvReturn = NULL;
 #else
     #error "please define OPERATE_SYSTEM Macro !!!"
 #endif
-
-	#if( configUSE_MALLOC_FAILED_HOOK == 1 )
+	if( pvReturn == NULL )
 	{
-		if( pvReturn == NULL )
-		{
-            MEM_MANAGE_PRINTF("error malloc failed !!");
-		}
-		else
-		{
-			MEM_NO_HANDLE(0);
-		}
+		if (xMemManage.malloc_fail_cb)
+			xMemManage.malloc_fail_cb(xWantedSize);
 	}
-	#endif
+	else
+	{
+		MEM_NO_HANDLE(0);
+	}
 
 	return pvReturn;
 }
 /*-----------------------------------------------------------*/
 
-void vPortFree( void *pv )
+void memFree( void *pv )
 {
-uint8_t *puc = ( uint8_t * ) pv;
-BlockLink_t *pxLink;
+	uint8_t *puc = ( uint8_t * ) pv;
+	BlockLink_t *pxLink;
 
 	if( pv != NULL )
 	{
@@ -292,44 +296,40 @@ BlockLink_t *pxLink;
 }
 /*-----------------------------------------------------------*/
 
-size_t xPortGetFreeHeapSize( void )
+size_t memGetFreeHeapSize( void )
 {
 	return xFreeBytesRemaining;
 }
 /*-----------------------------------------------------------*/
 
-size_t xPortGetMinimumEverFreeHeapSize( void )
+size_t memGetMinimumEverFreeHeapSize( void )
 {
 	return xMinimumEverFreeBytesRemaining;
 }
 
-size_t xPortGetFreeBlockNum( void )
+size_t memGetFreeBlockNum( void )
 {
 	return xFreeBlockNum;
 }
 
-// 打印此时内存池情况
-size_t xMemGetFreeBlockNum(uint8_t flag)
+// {"xMemFreeListLayout":[12,12],"num":2}
+void memPrintfFreeListLayout(void)
 {
 	BlockLink_t *pxIterator = &xStart;
-	size_t num = 0;
+	size_t num = 0,freeBlockTotalSize = 0;
 
-	if (flag)
-		MEM_MANAGE_PRINTF("\nxMemFreeBlock:\n");
+	MEM_MANAGE_PRINTF("\n{\"xMemFreeListLayout\":[");
 	while(pxIterator->pxNextFreeBlock != NULL)
 	{
 		if(pxIterator->xBlockSize > 0) {
-			// MEM_MANAGE_PRINTF("[%ld@0x%08x] ",pxIterator->xBlockSize,(size_t)(pxIterator));
-			if (flag)
-				MEM_MANAGE_PRINTF("[%ld] ",pxIterator->xBlockSize);
+			// MEM_MANAGE_PRINTF("{\"size\":%ld,\"0x\"%08x},",pxIterator->xBlockSize,(size_t)(pxIterator));
+			MEM_MANAGE_PRINTF("%ld,",pxIterator->xBlockSize);
+			freeBlockTotalSize += pxIterator->xBlockSize;
 			num++;
 		}
 		pxIterator = pxIterator->pxNextFreeBlock;
 	}
-	if (flag)
-		MEM_MANAGE_PRINTF(" ->num:%d\n",num);
-
-	return num;
+	MEM_MANAGE_PRINTF("%ld],\"num\":%d}\n",freeBlockTotalSize,num);
 }
 
 /*-----------------------------------------------------------*/
@@ -401,7 +401,7 @@ static void prvInsertBlockIntoFreeList( BlockLink_t *pxBlockToInsert )
 }
 /*-----------------------------------------------------------*/
 
-void vPortDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions )
+static void memDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions )
 {
     BlockLink_t *pxFirstFreeBlockInRegion = NULL, *pxPreviousFreeBlock;
     size_t xAlignedHeap;
@@ -494,8 +494,17 @@ void vPortDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions )
 	/* Work out the position of the top bit in a size_t variable. */
 	xBlockAllocatedBit = ( ( size_t ) 1 ) << ( ( sizeof( size_t ) * heapBITS_PER_BYTE ) - 1 );
 
-	MEM_MANAGE_PRINTF("\ninit xFreeBlockNum:%d\n",xFreeBlockNum);
-	xMemGetFreeBlockNum(1);
+	memPrintfFreeListLayout();
+}
+
+int memManageFunctionInit(mem_manage_t *mem_manage, const MemHeapRegion_t * const pxHeapRegions)
+{
+	if( mem_manage == NULL )
+		return -1;
+
+	memcpy(&xMemManage,mem_manage,sizeof(mem_manage_t));
+	memDefineHeapRegions(pxHeapRegions);
+	return 0;
 }
 
 // void* pvPortReAlloc( void *pv,  size_t xWantedSize )
@@ -507,11 +516,11 @@ void vPortDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions )
 // 	{
 // 		if( !xWantedSize )
 // 		{
-// 			vPortFree( pv );
+// 			memFree( pv );
 // 			return NULL;
 // 		}
 
-// 		void *newArea = pvPortMalloc( xWantedSize );
+// 		void *newArea = memMalloc( xWantedSize );
 // 		if( newArea )
 // 		{
 // 			/* The memory being freed will have an xBlockLink structure immediately
@@ -537,7 +546,7 @@ void vPortDefineHeapRegions( const MemHeapRegion_t * const pxHeapRegions )
 // 		}
 // 	}
 // 	else if( xWantedSize )
-// 		return pvPortMalloc( xWantedSize );
+// 		return memMalloc( xWantedSize );
 // 	else
 // 		return NULL;
 
@@ -549,7 +558,7 @@ void *pvPortCalloc(size_t xWantedCnt, size_t xWantedSize)
 	void *p;
 
 	/* allocate 'xWantedCnt' objects of size 'xWantedSize' */
-	p = pvPortMalloc(xWantedCnt * xWantedSize);
+	p = memMalloc(xWantedCnt * xWantedSize);
 	if (p) {
 		/* zero the memory */
 		memset(p, 0, xWantedCnt * xWantedSize);

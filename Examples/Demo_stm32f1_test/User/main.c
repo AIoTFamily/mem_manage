@@ -7,14 +7,7 @@
 
 #include "stm32f10x.h"
 #include "mem_manage.h"
-
-
-static uint8_t userHeap[0x4000] __attribute__((at(0x20001000)));
-MemHeapRegion_t xHeapRegions[] =
-{
-	{( uint8_t * )userHeap, sizeof(userHeap)}, // << Defines a block of 0x10000 bytes starting at address 0x80000000
-	{ NULL, 0 }                            // << Terminates the array.
-};
+#include <time.h>
 
 static void __NVIC_CONFIG(void)
 {
@@ -44,7 +37,6 @@ static void __rcc_clock_config(void)
 *******************************************/
 #define TEST_BLOCK_NUM  210
 static uint8_t *(user[TEST_BLOCK_NUM + 1]) = {NULL};
-static uint32_t usedMemSize = 0,freeMemSize = 0;
 
 static uint32_t __build_rand_value(void)
 {
@@ -56,9 +48,26 @@ static uint32_t __build_rand_value(void)
 	return rand_value;
 }
 
+static uint32_t calcate_used_mem_size(void)
+{
+    uint32_t i = 0,usedMemSize = 0;
+    for ( i = 0; i < TEST_BLOCK_NUM + 1; i++){
+        if (user[i] != NULL){
+            usedMemSize += i;
+        }
+    }
+    return usedMemSize;
+}
+
 static int mem_manage_test(void)
 {
     uint32_t rand_value = 0, size = 0;
+    static uint32_t count = 0;
+
+    if (count == 0){
+        srand(125);
+        count = 1;
+    }
 
     rand_value = __build_rand_value();
 
@@ -66,10 +75,7 @@ static int mem_manage_test(void)
     if (user[rand_value] == NULL){
         user[rand_value] = (uint8_t *)MEM_MALLOC(size);
         if (user[rand_value] == NULL){
-            SEGGER_RTT_printf(0,"MEM_MALLOC fail, want size:%d\n",size);
             return -1;
-        }else{
-            usedMemSize += size;
         }
     }
 
@@ -77,21 +83,34 @@ static int mem_manage_test(void)
     if (user[rand_value] != NULL){
         MEM_FREE(user[rand_value]);
         user[rand_value] = NULL;
-        freeMemSize += (rand_value);
     }
 
     return 0;
 }
 
+static void malloc_fail_handle(size_t xWantedSize)
+{
+    SEGGER_RTT_printf(0,"malloc_fail_handle,xWantedSize:%d\n",xWantedSize);
+}
+
+static uint8_t userHeap[0x4000] __attribute__((at(0x20001000)));
+static MemHeapRegion_t xHeapRegions[] ={
+	{( uint8_t * )userHeap, sizeof(userHeap)}, // << Defines a block of 0x10000 bytes starting at address 0x80000000
+	{ NULL, 0 }                                // << Terminates the array.
+};
+
 int main(void)
 {
     uint32_t freeMemBlockMaxNum = 0, freeNum = 0, testCount = 0;
-    /* 初始化随机数发生器 */
-    srand(125);
+    uint32_t usedMemSize = 0, freeMemSize = 0;
+
+    mem_manage_t mem_manage;
+    memset(&mem_manage,0,sizeof(mem_manage_t));
+    mem_manage.malloc_fail_cb = malloc_fail_handle;
+    memManageFunctionInit(&mem_manage,xHeapRegions);
+
     __NVIC_CONFIG();
     __rcc_clock_config();
-
-    vPortDefineHeapRegions(xHeapRegions);
 
 	SEGGER_RTT_printf(0,"mem test start.....\n");
 
@@ -99,16 +118,18 @@ int main(void)
     {
 		// SysTick_delay_ms(5);
 		
-        freeNum = xMemGetFreeBlockNum(0);
+        freeNum = memGetFreeBlockNum();
 		if( freeNum > freeMemBlockMaxNum ){
             freeMemBlockMaxNum = freeNum;
         }
 
         if( mem_manage_test() != 0){
-            SEGGER_RTT_printf(0,"test complete,count:%d,freeMemBlockMaxNum:%d.\n",testCount,freeMemBlockMaxNum);
-            SEGGER_RTT_printf(0,"used size:%d, free size:%d\n",usedMemSize,freeMemSize);
-
-            xMemGetFreeBlockNum(1);
+            SEGGER_RTT_printf(0,"test complete,count:%d.\n",testCount);
+            usedMemSize = calcate_used_mem_size();
+            freeMemSize = memGetFreeHeapSize();
+            SEGGER_RTT_printf(0,"used size:%d,free size:%d,usage rate:%d%c\n",usedMemSize,freeMemSize,\
+                                (usedMemSize * 100) / (freeMemSize + usedMemSize),37);
+            memPrintfFreeListLayout();
             break;
         }
 		testCount++;

@@ -128,6 +128,7 @@ void PendSV_Handler(void)
 }
 
 static uint32_t SysTickDelay = 0;
+uint32_t SysTickCount = 0;
 
 void SysTick_delay_ms(uint32_t ms)
 {
@@ -144,6 +145,8 @@ void SysTick_Handler(void)
 {
 	if(SysTickDelay)
 		SysTickDelay--;
+	
+	SysTickCount++;
 }
 
 /******************************************************************************/
